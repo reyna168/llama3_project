@@ -1,116 +1,123 @@
+from groq import Groq
+from pinecone import Pinecone
 import os
-import psycopg2
-from flask import Flask, request, jsonify
-from sqlalchemy import create_engine, Column, Integer, Text
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from sentence_transformers import SentenceTransformer
-from transformers import AutoModel, AutoTokenizer
+
+from langchain_community.embeddings.sentence_transformer import SentenceTransformerEmbeddings
+from langchain_pinecone import PineconeVectorStore
 
 
-# Pinecone 數據庫
+def get_relevant_excerpts(user_question, docsearch):
+    """
+    This function retrieves the most relevant excerpts from presidential speeches based on the user's question.
+    Parameters:
+    user_question (str): The question asked by the user.
+    docsearch (PineconeVectorStore): The Pinecone vector store containing the presidential speeches.
+    Returns:
+    str: A string containing the most relevant excerpts from presidential speeches.
+    """
 
-API_KEY ="be8b9a00-97b4-47d4-8e8a-56f0c0da9700"
+    # Perform a similarity search on the Pinecone vector store using the user's question
+    relevent_docs = docsearch.similarity_search(user_question)
+
+    # Extract the page content from the top 3 most relevant documents and join them into a single string
+    relevant_excerpts = '\n\n------------------------------------------------------\n\n'.join([doc.page_content for doc in relevent_docs[:3]])
+
+    return relevant_excerpts
 
 
-# 数据库连接参数
-DB_NAME = "your_db"
-DB_USER = "your_user"
-DB_PASSWORD = "your_password"
-DB_HOST = "localhost"
-DB_PORT = "5432"
+def presidential_speech_chat_completion(client, model, user_question, relevant_excerpts):
+    """
+    This function generates a response to the user's question using a pre-trained model.
+    Parameters:
+    client (Groq): The Groq client used to interact with the pre-trained model.
+    model (str): The name of the pre-trained model.
+    user_question (str): The question asked by the user.
+    relevant_excerpts (str): A string containing the most relevant excerpts from presidential speeches.
+    Returns:
+    str: A string containing the response to the user's question.
+    """
 
-# 加载嵌入模型
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')  # 根据需要选择模型
+    # Define the system prompt
+    system_prompt = '''
+    You are a presidential historian. Given the user's question and relevant excerpts from 
+    presidential speeches, answer the question by including direct quotes from presidential speeches. 
+    When using a quote, site the speech that it was from (ignoring the chunk).
+    '''
 
-# 加载 LLaMA3 模型和 tokenizer
-MODEL_NAME = "facebook/llama-3"  # 替换为实际模型名称
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME)
-
-# 数据库设置
-Base = declarative_base()
-
-class Document(Base):
-    __tablename__ = 'documents'
-    id = Column(Integer, primary_key=True)
-    content = Column(Text, nullable=False)
-    embedding = Column(Text)  # pgvector 类型，具体视 ORM 支持情况而定
-
-# 创建数据库引擎和会话
-engine = create_engine(f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
-Session = sessionmaker(bind=engine)
-session = Session()
-
-# 向量嵌入生成函数
-def get_embedding(text):
-    embedding = embedding_model.encode(text)
-    return embedding.tolist()
-
-# 搜索相似文档函数
-def search_similar_documents(query, top_k=5):
-    query_embedding = get_embedding(query)
-    conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT
+    # Generate a response to the user's question using the pre-trained model
+    chat_completion = client.chat.completions.create(
+        messages = [
+            {
+                "role": "system",
+                "content":  system_prompt
+            },
+            {
+                "role": "user",
+                "content": "User Question: " + user_question + "\n\nRelevant Speech Exerpt(s):\n\n" + relevant_excerpts,
+            }
+        ],
+        model = model
     )
-    cur = conn.cursor()
-    
-    # 使用 pgvector 的 <-> 运算符进行向量距离计算
-    cur.execute("""
-        SELECT id, content
-        FROM documents
-        ORDER BY embedding <-> %s
-        LIMIT %s
-    """, (query_embedding, top_k))
-    
-    results = cur.fetchall()
-    cur.close()
-    conn.close()
-    
-    return [row[1] for row in results]
 
-# 回答生成函数
-def generate_answer(query, context, max_length=150, temperature=0.7):
-    prompt = f"Context: {context}\n\nQ: {query}\nA:"
-    inputs = tokenizer.encode(prompt, return_tensors='pt')
-    outputs = model.generate(
-        inputs,
-        max_length=max_length,
-        temperature=temperature,
-        top_p=0.95,
-        do_sample=True,
-        num_return_sequences=1,
-        eos_token_id=tokenizer.eos_token_id
+    # Extract the response from the chat completion
+    response = chat_completion.choices[0].message.content
+
+    return response
+
+
+def main():
+    """
+    This is the main function that runs the application. It initializes the Groq client and the SentenceTransformer model,
+    gets user input from the Streamlit interface, retrieves relevant excerpts from presidential speeches based on the user's question,
+    generates a response to the user's question using a pre-trained model, and displays the response.
+    """
+
+    model = 'llama3-8b-8192'
+
+    embedding_function = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
+
+    # Initialize the Groq client
+    #groq_api_key = os.getenv('GROQ_API_KEY')
+    #pinecone_api_key=os.getenv('PINECONE_API_KEY')
+
+    groq_api_key = "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"
+    pinecone_api_key="pcsk_tc46z_6wbCqmtFErgvq29sqKPbLNpwcXDMMRkXnmVBYju1SvCcAezF3p7Gkta3Lhj2GHr"
+
+    #groq_api_key = os.getenv('GROQ_API_KEY')
+    #pinecone_api_key=os.getenv('PINECONE_API_KEY')
+
+
+    pinecone_index_name = "presidential-speeches"
+    client = Groq(
+        api_key="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",
     )
-    answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    answer = answer.split("A:")[-1].strip()
-    return answer
 
-# 回答问题函数
-def answer_question(query):
-    similar_docs = search_similar_documents(query)
-    context = "\n\n".join(similar_docs)
-    answer = generate_answer(query, context)
-    return answer
+    pc = Pinecone(api_key = pinecone_api_key)
+    docsearch = PineconeVectorStore(index_name=pinecone_index_name, embedding=embedding_function)
 
-# 创建 Flask 应用
-app = Flask(__name__)
+    # Display the title and introduction of the application
+    print("Presidential Speeches RAG")
+    multiline_text = """
+    Welcome! Ask questions about U.S. presidents, like "What were George Washington's views on democracy?" or "What did Abraham Lincoln say about national unity?". The app matches your question to relevant excerpts from presidential speeches and generates a response using a pre-trained model.
+    """
 
-@app.route("/ask", methods=["POST"])
-def ask():
-    data = request.json
-    query = data.get("question")
-    if not query:
-        return jsonify({"error": "No question provided"}), 400
-    
-    answer = answer_question(query)
-    return jsonify({"answer": answer})
+    print(multiline_text)
+
+
+    while True:
+        # Get the user's question
+        user_question = input("Ask a question about a US president: ")
+
+        if user_question:
+            pinecone_index_name = "presidential-speeches"
+            relevant_excerpts = get_relevant_excerpts(user_question, docsearch)
+            response = presidential_speech_chat_completion(client, model, user_question, relevant_excerpts)
+            print(response)
+
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
-
     
+    os.environ['PINECONE_API_KEY'] = "pcsk_tc46z_6wbCqmtFErgvq29sqKPbLNpwcXDMMRkXnmVBYju1SvCcAezF3p7Gkta3Lhj2GHr"
+
+    main()
