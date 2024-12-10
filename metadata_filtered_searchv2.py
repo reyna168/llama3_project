@@ -216,20 +216,79 @@ def display_result(image_batch):
 
 
 from PIL import Image, ImageDraw
- # 創建一個空白畫布 
-canvas_width = 60 * 5 
-# 假設每行顯示5張圖片
-canvas_height = 80 * 3 
-# 假設顯示3行圖片
-canvas = Image.new('RGB', (canvas_width, canvas_height), 'white')
-draw = ImageDraw.Draw(canvas)
+#  # 創建一個空白畫布 
+# canvas_width = 60 * 5 
+# # 假設每行顯示5張圖片
+# canvas_height = 80 * 3 
+# # 假設顯示3行圖片
+# canvas = Image.new('RGB', (canvas_width, canvas_height), 'white')
+# draw = ImageDraw.Draw(canvas)
 
 
-# 將圖片依次放入畫布中
-for i, img in enumerate(imgs):
-     row = i // 5 
-     col = i % 5 
-     canvas.paste(img, (col * 60, row * 80)) # 顯示畫布
-     canvas.show()
-# 当我们在index.query()方法中除入传入vector外， 还传入了sparse_vector, 我们完成了一次混合向量查询
-# 图片由二进制表达，更适合密集向量
+# # 將圖片依次放入畫布中
+# for i, img in enumerate(imgs):
+#      row = i // 5 
+#      col = i % 5 
+#      canvas.paste(img, (col * 60, row * 80)) # 顯示畫布
+#      canvas.show()
+# # 当我们在index.query()方法中除入传入vector外， 还传入了sparse_vector, 我们完成了一次混合向量查询
+# # 
+
+from PIL import Image
+
+def create_image_canvas(image_list, rows, cols, image_size=(60, 80), spacing=10):
+    """
+    Combines multiple images into a single canvas.
+    
+    Parameters:
+        image_list (list): List of PIL.Image objects.
+        rows (int): Number of rows in the canvas.
+        cols (int): Number of columns in the canvas.
+        image_size (tuple): Size (width, height) of each image.
+        spacing (int): Space between images.
+    
+    Returns:
+        PIL.Image: Combined canvas with images.
+    """
+    # Calculate canvas size
+    canvas_width = cols * (image_size[0] + spacing) - spacing
+    canvas_height = rows * (image_size[1] + spacing) - spacing
+    canvas = Image.new("RGB", (canvas_width, canvas_height), "white")
+
+    # Place each image on the canvas
+    for idx, img in enumerate(image_list):
+        if idx >= rows * cols:
+            break  # Stop if more images than grid space
+        # Resize image
+        img = img.resize(image_size)
+        # Calculate position
+        col = idx % cols
+        row = idx // cols
+        x = col * (image_size[0] + spacing)
+        y = row * (image_size[1] + spacing)
+        canvas.paste(img, (x, y))
+
+    return canvas
+
+
+# Example usage
+from PIL import Image
+
+# # Create some sample images
+# image_list = [
+#     Image.new("RGB", (60, 80), "red"),
+#     Image.new("RGB", (60, 80), "blue"),
+#     Image.new("RGB", (60, 80), "green"),
+#     Image.new("RGB", (60, 80), "yellow"),
+#     Image.new("RGB", (60, 80), "purple"),
+#     Image.new("RGB", (60, 80), "orange")
+# ]
+
+# Create a canvas with 2 rows and 3 columns
+canvas = create_image_canvas(imgs, rows=5, cols=3)
+
+# Show the canvas
+canvas.show()
+
+# Save the canvas as a file (optional)
+canvas.save("combined_canvas.png")
